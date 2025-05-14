@@ -51,7 +51,7 @@ if uploaded_file is not None:
             st.write("No similar users found for this user.")
         else:
             # Weighted sum of product vectors of similar users
-            weighted_scores = purchase_matrix.T.dot(sim_scores)
+            weighted_scores = purchase_matrix.loc[sim_scores.index].T.dot(sim_scores)
             # Remove products already bought by the selected user
             user_vector = purchase_matrix.loc[selected_user]
             new_scores = weighted_scores[user_vector == 0]
