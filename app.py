@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
-
 # Set up the Streamlit app
 st.set_page_config(page_title="Product Recommendation", layout="centered")
 st.title("User-Based Product Recommendation")
