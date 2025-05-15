@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
+from fuzzywuzzy import process
 
 # Set up the Streamlit app
 st.set_page_config(page_title="Product Recommendation", layout="centered")
@@ -41,6 +42,16 @@ sim_df = pd.DataFrame(sim_matrix,
 st.success("Data loaded successfully. Similarity matrix computed.")
 st.write("### Select or Input a User to Recommend Products")
 
+# Prepare cleaned product titles for matching
+tools_df['Title_clean'] = tools_df['Title'].str.lower().str.strip()
+product_choices = tools_df['Title_clean'].tolist()
+
+def find_best_match(prod_name, choices, threshold=70):
+    match, score = process.extractOne(prod_name.lower().strip(), choices)
+    if score >= threshold:
+        return match
+    return None
+
 # Allow user to either select or enter a user ID
 user_list = list(purchase_matrix.index)
 selected_user = st.selectbox("Select a User ID", user_list)
@@ -69,18 +80,16 @@ if custom_user_input in purchase_matrix.index:
         else:
             st.subheader("Top 5 Recommended Products:")
             
-            # Normalize titles for better matching
-            tools_df['Title_clean'] = tools_df['Title'].str.lower().str.strip()
             for prod in top5.index:
-                prod_clean = prod.lower().strip()
-                match = tools_df[tools_df['Title_clean'].str.contains(prod_clean, na=False)]
+                best_match = find_best_match(prod, product_choices)
 
-                if not match.empty:
-                    image_url = match.iloc[0]['Image']
-                    title_url = match.iloc[0]['Title_URL']
+                if best_match:
+                    row = tools_df[tools_df['Title_clean'] == best_match].iloc[0]
+                    image_url = row['Image']
+                    title_url = row['Title_URL']
                     st.markdown(f"### [{prod}]({title_url})")
                     st.image(image_url, use_column_width=True)
                 else:
-                    st.write("–", prod)
+                    st.write(f"– {prod} (No image found)")
 else:
     st.warning("User ID not found in the dataset.")
