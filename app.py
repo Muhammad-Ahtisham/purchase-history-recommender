@@ -101,36 +101,38 @@ else:
 
 # ------------------------- New User Feature -------------------------
 st.write("---")
-st.write("### New User Registration and Recommendations")
+st.write("## 🆕 Create a New User Profile and Get Recommendations")
 
-# Input for new user
-new_user_id = st.text_input("Enter a new User ID:")
-new_user_purchases = st.text_input("Enter purchased tools separated by '|': (Leave blank for no history)")
+new_user_id = st.text_input("🔹 Enter New User ID")
+new_user_purchases = st.text_input("🔹 Purchased tools (use '|' to separate multiple items):")
 
-if st.button("Add User and Recommend"):
-    if new_user_id in purchase_matrix.index:
-        st.warning("User ID already exists. Try a different one.")
+if st.button("✅ Create User and Get Recommendations"):
+    if new_user_id.strip() == "":
+        st.warning("Please enter a valid User ID.")
+    elif new_user_id in purchase_matrix.index:
+        st.warning("User ID already exists. Please choose a new one.")
     else:
-        # Process purchase history
-        new_user_series = pd.Series(0, index=purchase_matrix.columns)
+        # Create a new user row with 0s
+        new_user_row = pd.Series(0, index=purchase_matrix.columns)
         if new_user_purchases.strip():
-            purchased_items = [item.strip() for item in new_user_purchases.split('|')]
-            for item in purchased_items:
-                if item in new_user_series.index:
-                    new_user_series[item] = 1
-        # Append new user to purchase matrix
-        purchase_matrix.loc[new_user_id] = new_user_series
-        # Recompute similarity matrix
+            tools = [tool.strip() for tool in new_user_purchases.split('|')]
+            for tool in tools:
+                if tool in new_user_row.index:
+                    new_user_row[tool] = 1
+
+        # Add to purchase matrix
+        purchase_matrix.loc[new_user_id] = new_user_row
+
+        # Recalculate similarity matrix
         sim_matrix = cosine_similarity(purchase_matrix.values)
         sim_df = pd.DataFrame(sim_matrix, index=purchase_matrix.index, columns=purchase_matrix.index)
 
         if new_user_purchases.strip():
-            # Similarity scores
             sim_scores = sim_df[new_user_id].drop(new_user_id)
             sim_scores = sim_scores[sim_scores > 0]
 
             if sim_scores.empty:
-                st.write("No similar users found yet.")
+                st.write("No similar users found.")
             else:
                 weighted_scores = purchase_matrix.loc[sim_scores.index].T.dot(sim_scores)
                 user_vector = purchase_matrix.loc[new_user_id]
@@ -138,9 +140,9 @@ if st.button("Add User and Recommend"):
                 top5 = new_scores.sort_values(ascending=False).head(5)
 
                 if top5.empty:
-                    st.write("No new product recommendations available.")
+                    st.write("No new recommendations for now.")
                 else:
-                    st.subheader("Top 5 Recommended Products for New User:")
+                    st.subheader(f"Top 5 Recommendations for {new_user_id}:")
                     for prod in top5.index:
                         best_match = find_best_match(prod, product_choices)
                         if best_match:
@@ -153,8 +155,8 @@ if st.button("Add User and Recommend"):
                         else:
                             st.write(f"– {prod} (No image found)")
         else:
-            # Recommend default products (e.g., top purchased)
-            st.subheader("Default Recommendations for New User with No History:")
+            # Default recommendation: Top purchased tools
+            st.subheader(f"Default Recommendations for {new_user_id} (No purchase history):")
             top_products = purchase_matrix.sum().sort_values(ascending=False).head(5)
             for prod in top_products.index:
                 best_match = find_best_match(prod, product_choices)
