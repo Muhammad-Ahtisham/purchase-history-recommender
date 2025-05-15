@@ -39,7 +39,6 @@ sim_df = pd.DataFrame(sim_matrix,
                       index=purchase_matrix.index, 
                       columns=purchase_matrix.index)
 
-st.success("Data loaded successfully. Similarity matrix computed.")
 st.write("### Select or Input a User to Recommend Products")
 
 # Prepare cleaned product titles for matching
