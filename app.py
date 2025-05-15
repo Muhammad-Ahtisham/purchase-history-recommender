@@ -88,7 +88,12 @@ if custom_user_input in purchase_matrix.index:
                     image_url = row['Image']
                     title_url = row['Title_URL']
                     st.markdown(f"### [{prod}]({title_url})")
-                    st.image(image_url, use_column_width=True)
+                    st.write(f"Image URL: {image_url}")  # Debug output to check URL
+
+                    try:
+                        st.image(image_url, use_container_width=True)
+                    except Exception as e:
+                        st.error(f"Error loading image: {e}")
                 else:
                     st.write(f"– {prod} (No image found)")
 else:
