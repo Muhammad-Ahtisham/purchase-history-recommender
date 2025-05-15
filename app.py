@@ -16,7 +16,7 @@ def load_data():
 # Load tool image and product ID dataset
 @st.cache_data
 def load_tool_data():
-    return pd.read_excel("/mnt/data/Tools_1.xlsx")
+    return pd.read_excel("Tools_1.xlsx")
 
 # Try loading both datasets
 try:
