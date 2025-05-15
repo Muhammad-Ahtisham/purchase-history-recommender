@@ -13,10 +13,13 @@ st.write("Product recommendations based on purchase history similarity.")
 def load_data():
     return pd.read_excel("surgical_tool_recommendation_users.xlsx")
 
-# Load tool image and product ID dataset
+# Load tool dataset with images and titles
 @st.cache_data
 def load_tool_data():
-    return pd.read_excel("Tools_1.xlsx")
+    df_tool = pd.read_excel("Tools_1.xlsx")
+    # Extract ProductID from title (after '|') and strip whitespace
+    df_tool['ProductID'] = df_tool['title'].astype(str).str.extract(r'\|\s*(.+)$')[0].str.strip()
+    return df_tool
 
 # Try loading both datasets
 try:
@@ -37,8 +40,8 @@ if 'userID' not in df.columns or 'previousPurchases' not in df.columns:
     st.stop()
 
 # Check required columns in tool dataset
-if 'ProductID' not in tool_df.columns or 'ImageURL' not in tool_df.columns:
-    st.error("The tool dataset must contain 'ProductID' and 'ImageURL' columns.")
+if 'ProductID' not in tool_df.columns or 'Image' not in tool_df.columns:
+    st.error("The tool dataset must contain 'ProductID' and 'Image' columns.")
     st.stop()
 
 # One-hot encode the 'previousPurchases' by splitting on '|'
@@ -58,9 +61,9 @@ user_list = list(purchase_matrix.index)
 selected_user = st.selectbox("Select a User ID", user_list)
 custom_user_input = st.text_input("Or enter a User ID manually:", value=selected_user)
 
-# Function to get image URL by product name
-def get_image_url(product_name):
-    match = tool_df[tool_df['ProductID'].astype(str).str.lower() == product_name.lower()]
+# Function to get image URL by product ID
+def get_image_url(product_id):
+    match = tool_df[tool_df['ProductID'].str.lower() == product_id.lower()]
     if not match.empty:
         return match['ImageURL'].values[0]
     return None
