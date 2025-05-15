@@ -18,7 +18,7 @@ def load_data():
 def load_tool_data():
     df_tool = pd.read_excel("Tools_1.xlsx")
     # Extract ProductID from title (after '|') and strip whitespace
-    df_tool['ProductID'] = df_tool['title'].astype(str).str.extract(r'\|\s*(.+)$')[0].str.strip()
+    df_tool['ProductID'] = df_tool['Title'].astype(str).str.extract(r'\|\s*(.+)$')[0].str.strip()
     return df_tool
 
 # Try loading both datasets
