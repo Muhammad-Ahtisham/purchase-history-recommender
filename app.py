@@ -38,9 +38,7 @@ sim_matrix = cosine_similarity(purchase_matrix.values)
 sim_df = pd.DataFrame(sim_matrix, 
                       index=purchase_matrix.index, 
                       columns=purchase_matrix.index)
-
 st.write("### Select or Input a User to Recommend Products")
-
 # Prepare cleaned product titles for matching
 tools_df['Title_clean'] = tools_df['Title'].str.lower().str.strip()
 product_choices = tools_df['Title_clean'].tolist()
