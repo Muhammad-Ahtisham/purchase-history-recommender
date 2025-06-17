@@ -24,7 +24,7 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS tools (
     Title TEXT,
     Title_URL TEXT,
     Image TEXT,
-    Specifications TEXT,
+    Category TEXT,
     Specialty TEXT
 )''')
 conn.commit()
@@ -34,6 +34,7 @@ conn.commit()
 def load_data_fresh():
     user_df = pd.read_sql_query("SELECT * FROM users", conn)
     tools_df = pd.read_sql_query("SELECT * FROM tools", conn)
+    tools_df.columns = tools_df.columns.str.strip().str.lower()
     return user_df, tools_df
 
 # ---------- FIND MATCH FUNCTION ----------
@@ -49,21 +50,21 @@ def get_updated_data():
     purchase_matrix = df.set_index('userID')['previousPurchases'].str.get_dummies(sep='|')
     sim_matrix = cosine_similarity(purchase_matrix.values)
     sim_df = pd.DataFrame(sim_matrix, index=purchase_matrix.index, columns=purchase_matrix.index)
-    tools_df['Title_clean'] = tools_df['Title'].str.lower().str.strip()
-    product_choices = tools_df['Title_clean'].tolist()
+    tools_df['title_clean'] = tools_df['title'].str.lower().str.strip()
+    product_choices = tools_df['title_clean'].tolist()
     return df, tools_df, purchase_matrix, sim_df, product_choices
 
 # ---------- CONTENT-BASED FILTERING FUNCTIONS ----------
 def similar_products_view(tools_df, selected_title):
     tfidf = TfidfVectorizer(stop_words='english')
-    specs_matrix = tfidf.fit_transform(tools_df['Specifications'].fillna(''))
-    idx = tools_df[tools_df['Title'] == selected_title].index[0]
+    specs_matrix = tfidf.fit_transform(tools_df['category'].fillna(''))
+    idx = tools_df[tools_df['title'] == selected_title].index[0]
     cosine_sim = cosine_similarity(specs_matrix[idx], specs_matrix).flatten()
     similar_indices = cosine_sim.argsort()[-6:][::-1]
     return tools_df.iloc[similar_indices[1:]]
 
 def products_by_specialty(tools_df, specialty):
-    return tools_df[tools_df['Specialty'].str.lower() == specialty.lower()].head(5)
+    return tools_df[tools_df['specialty'].str.lower() == specialty.lower()].head(5)
 
 # ---------- TABS ----------
 tab1, tab2, tab3 = st.tabs(["📊 Recommend Products", "➕ Add New User", "🔍 Content-Based Suggestions"])
@@ -96,10 +97,10 @@ with tab1:
                 for prod in top5.index:
                     best_match = find_best_match(prod, product_choices)
                     if best_match:
-                        row = tools_df[tools_df['Title_clean'] == best_match].iloc[0]
-                        st.markdown(f"### [{prod}]({row['Title_URL']})")
+                        row = tools_df[tools_df['title_clean'] == best_match].iloc[0]
+                        st.markdown(f"### [{prod}]({row['title_url']})")
                         try:
-                            st.image(row['Image'], width=400)
+                            st.image(row['image'], width=400)
                         except:
                             st.write("(Image unavailable)")
                     else:
@@ -132,16 +133,16 @@ with tab2:
 with tab3:
     df, tools_df, *_ = get_updated_data()
     st.write("## 🧠 Content-Based Product Filtering")
-    tool_titles = tools_df['Title'].tolist()
+    tool_titles = tools_df['title'].tolist()
     selected_tool = st.selectbox("🔎 Select a tool to find similar ones", tool_titles)
 
     if selected_tool:
         st.subheader("🔁 Similar Products")
         similar_df = similar_products_view(tools_df, selected_tool)
         for _, row in similar_df.iterrows():
-            st.markdown(f"### [{row['Title']}]({row['Title_URL']})")
+            st.markdown(f"### [{row['title']}]({row['title_url']})")
             try:
-                st.image(row['Image'], width=400)
+                st.image(row['image'], width=400)
             except:
                 st.write("(Image unavailable)")
 
@@ -151,8 +152,8 @@ with tab3:
         st.subheader(f"🔧 Tools for '{specialty_input}' Specialty")
         spec_df = products_by_specialty(tools_df, specialty_input)
         for _, row in spec_df.iterrows():
-            st.markdown(f"### [{row['Title']}]({row['Title_URL']})")
+            st.markdown(f"### [{row['title']}]({row['title_url']})")
             try:
-                st.image(row['Image'], width=400)
+                st.image(row['image'], width=400)
             except:
                 st.write("(Image unavailable)")
