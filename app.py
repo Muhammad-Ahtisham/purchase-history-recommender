@@ -18,9 +18,15 @@ cursor = conn.cursor()
 # ---------- INIT DB TABLES ----------
 cursor.execute('''CREATE TABLE IF NOT EXISTS users (
     userID TEXT PRIMARY KEY,
-    previousPurchases TEXT,
-    specialty TEXT
+    previousPurchases TEXT
 )''')
+
+# Ensure 'specialty' column exists in 'users' table
+try:
+    cursor.execute("ALTER TABLE users ADD COLUMN specialty TEXT")
+    conn.commit()
+except sqlite3.OperationalError:
+    pass  # Column already exists
 
 cursor.execute('''CREATE TABLE IF NOT EXISTS tools (
     Title TEXT,
