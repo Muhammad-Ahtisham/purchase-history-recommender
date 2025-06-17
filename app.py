@@ -4,6 +4,11 @@ import sqlite3
 from sklearn.metrics.pairwise import cosine_similarity
 from fuzzywuzzy import process
 
+# For content-based filtering
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.preprocessing import MinMaxScaler
+import numpy as np
+
 # ------------------ SETUP ------------------
 st.set_page_config(page_title="Product Recommendation", layout="centered")
 st.title("🔍 Surgical Tool Recommendation System")
@@ -21,7 +26,9 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS users (
 cursor.execute('''CREATE TABLE IF NOT EXISTS tools (
     Title TEXT,
     Title_URL TEXT,
-    Image TEXT
+    Image TEXT,
+    Category TEXT,
+    Price REAL
 )''')
 conn.commit()
 
@@ -50,7 +57,7 @@ def get_updated_data():
     return df, tools_df, purchase_matrix, sim_df, product_choices
 
 # ---------- TABS ----------
-tab1, tab2 = st.tabs(["📊 Recommend Products", "➕ Add New User"])
+tab1, tab2, tab3 = st.tabs(["📊 Recommend Products", "➕ Add New User", "🧠 Content-Based Filter"])
 
 # ========== TAB 1: RECOMMENDATION ==========
 with tab1:
@@ -101,7 +108,6 @@ with tab2:
         if new_user_id.strip() == "" or new_user_purchases.strip() == "":
             st.warning("Please enter both User ID and purchase history.")
         else:
-            # Check if user already exists
             cursor.execute("SELECT COUNT(*) FROM users WHERE userID=?", (new_user_id,))
             if cursor.fetchone()[0] > 0:
                 st.warning("User ID already exists. Please choose another one.")
@@ -112,7 +118,6 @@ with tab2:
                 st.success(f"User '{new_user_id}' added successfully!")
                 st.cache_data.clear()
 
-                # Reload and recommend
                 df, tools_df, purchase_matrix, sim_df, product_choices = get_updated_data()
                 sim_scores = sim_df[new_user_id].drop(new_user_id)
                 sim_scores = sim_scores[sim_scores > 0]
@@ -138,3 +143,38 @@ with tab2:
                             st.write("(Image unavailable)")
                     else:
                         st.write(f"- {prod} (No match found)")
+
+# ========== TAB 3: CONTENT-BASED FILTERING ==========
+with tab3:
+    st.write("## 🧠 Content-Based Product Suggestions")
+
+    _, tools_df = load_data_fresh()
+    tools_df = tools_df.dropna(subset=["Title", "Category"])
+
+    selected_title = st.selectbox("🔍 Choose a product to find similar ones:", tools_df["Title"])
+    specialty = st.selectbox("🩺 Select your medical specialty (Category):", sorted(tools_df["Category"].unique()))
+
+    tfidf = TfidfVectorizer(stop_words="english")
+    tfidf_matrix = tfidf.fit_transform(tools_df["Title"] + " " + tools_df["Category"])
+
+    scaler = MinMaxScaler()
+    price_scaled = scaler.fit_transform(tools_df[["Price"]].fillna(0))
+
+    combined_features = np.hstack([tfidf_matrix.toarray(), price_scaled])
+    sim_matrix = cosine_similarity(combined_features)
+
+    index = tools_df[tools_df["Title"] == selected_title].index[0]
+    sim_scores = list(enumerate(sim_matrix[index]))
+    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)[1:6]
+
+    st.subheader("🔁 Similar Products:")
+    for idx, score in sim_scores:
+        row = tools_df.iloc[idx]
+        st.markdown(f"### [{row['Title']}]({row['Title_URL']})\nCategory: *{row['Category']}*  \n💰 Price: ${row['Price']:.2f}")
+        st.image(row['Image'], use_container_width=True)
+
+    st.subheader("💼 Specialty-Specific Tools:")
+    spec_tools = tools_df[tools_df["Category"] == specialty].head(5)
+    for _, row in spec_tools.iterrows():
+        st.markdown(f"### [{row['Title']}]({row['Title_URL']})\n💰 Price: ${row['Price']:.2f}")
+        st.image(row['Image'], use_container_width=True)
