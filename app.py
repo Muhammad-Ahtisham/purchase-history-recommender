@@ -5,12 +5,11 @@ import sqlite3
 from sklearn.metrics.pairwise import cosine_similarity
 from fuzzywuzzy import process
 
-# --- Setup ---
 st.set_page_config(page_title="Product Recommendation", layout="centered")
 st.title("User-Based Product Recommendation")
 st.write("Product recommendations based on purchase history similarity.")
 
-# --- Load Data from SQLite ---
+# -------- Cached and fresh data loaders --------
 @st.cache_data
 def load_data():
     conn = sqlite3.connect("recommendation.db")
@@ -19,18 +18,25 @@ def load_data():
     conn.close()
     return users_df, tools_df
 
+def load_data_fresh():
+    conn = sqlite3.connect("recommendation.db")
+    users_df = pd.read_sql_query("SELECT * FROM users", conn)
+    tools_df = pd.read_sql_query("SELECT * FROM tools", conn)
+    conn.close()
+    return users_df, tools_df
+
+# -------- Load initial data --------
 try:
     df, tools_df = load_data()
 except Exception as e:
     st.error(f"❌ Error loading database: {e}")
     st.stop()
 
-# Check for required columns
 if 'userID' not in df.columns or 'previousPurchases' not in df.columns:
     st.error("The 'users' table must contain 'userID' and 'previousPurchases'.")
     st.stop()
 
-# --- Preprocessing ---
+# -------- Preprocessing --------
 purchase_matrix = df.set_index('userID')['previousPurchases'].str.get_dummies(sep='|')
 sim_matrix = cosine_similarity(purchase_matrix.values)
 sim_df = pd.DataFrame(sim_matrix, index=purchase_matrix.index, columns=purchase_matrix.index)
@@ -42,7 +48,7 @@ def find_best_match(prod_name, choices, threshold=70):
     match, score = process.extractOne(prod_name.lower().strip(), choices)
     return match if score >= threshold else None
 
-# --- User Selection ---
+# -------- User-Based Recommendation --------
 st.write("### Select or Input a User to Recommend Products")
 user_list = list(purchase_matrix.index)
 selected_user = st.selectbox("Select a User ID", user_list)
@@ -79,7 +85,7 @@ if custom_user_input in purchase_matrix.index:
 else:
     st.warning("User ID not found in the dataset.")
 
-# --- Add New User ---
+# -------- Add New User Section --------
 st.write("---")
 st.write("## 🆕 Add New User Profile")
 
@@ -99,13 +105,19 @@ if st.button("✅ Add and Recommend"):
                 (new_user_id, new_user_purchases.strip())
             )
             conn.commit()
-            st.success(f"User '{new_user_id}' added!")
+            st.success(f"✅ User '{new_user_id}' added to database!")
 
-            # Reload data
-            df, tools_df = load_data()
+            # Clear cache and load fresh data
+            st.cache_data.clear()
+            df, tools_df = load_data_fresh()
+
+            # Update matrices
             purchase_matrix = df.set_index('userID')['previousPurchases'].str.get_dummies(sep='|')
             sim_matrix = cosine_similarity(purchase_matrix.values)
             sim_df = pd.DataFrame(sim_matrix, index=purchase_matrix.index, columns=purchase_matrix.index)
+
+            tools_df['Title_clean'] = tools_df['Title'].str.lower().str.strip()
+            product_choices = tools_df['Title_clean'].tolist()
 
             if new_user_purchases.strip():
                 sim_scores = sim_df[new_user_id].drop(new_user_id)
