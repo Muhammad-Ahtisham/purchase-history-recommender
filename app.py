@@ -21,9 +21,9 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS users (
     previousPurchases TEXT
 )''')
 
-# Ensure 'specialty' column exists in 'users' table
+# Ensure 'category' column exists in 'users' table
 try:
-    cursor.execute("ALTER TABLE users ADD COLUMN specialty TEXT")
+    cursor.execute("ALTER TABLE users ADD COLUMN category TEXT")
     conn.commit()
 except sqlite3.OperationalError:
     pass  # Column already exists
@@ -36,7 +36,7 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS tools (
     Length TEXT,
     Use TEXT,
     Brand TEXT,
-    Specialty TEXT
+    Category TEXT
 )''')
 conn.commit()
 
@@ -120,18 +120,18 @@ with tab2:
     st.write("## ➕ Create a New User Profile")
     new_user_id = st.text_input("🔹 Enter New User ID")
     new_user_purchases = st.text_input("🔹 Purchased tools (use '|' to separate multiple items):")
-    new_user_specialty = st.text_input("🔹 Enter Medical Specialty (e.g., Orthopedic, Neurosurgical)")
+    new_user_category = st.text_input("🔹 Enter Tool Category (e.g., Cutting, Grasping)")
 
     if st.button("✅ Add User and Generate Recommendations"):
-        if new_user_id.strip() == "" or new_user_purchases.strip() == "" or new_user_specialty.strip() == "":
-            st.warning("Please enter User ID, purchases, and specialty.")
+        if new_user_id.strip() == "" or new_user_purchases.strip() == "" or new_user_category.strip() == "":
+            st.warning("Please enter User ID, purchases, and category.")
         else:
             cursor.execute("SELECT COUNT(*) FROM users WHERE userID=?", (new_user_id,))
             if cursor.fetchone()[0] > 0:
                 st.warning("User ID already exists. Please choose another one.")
             else:
-                cursor.execute("INSERT INTO users (userID, previousPurchases, specialty) VALUES (?, ?, ?)",
-                               (new_user_id.strip(), new_user_purchases.strip(), new_user_specialty.strip()))
+                cursor.execute("INSERT INTO users (userID, previousPurchases, category) VALUES (?, ?, ?)",
+                               (new_user_id.strip(), new_user_purchases.strip(), new_user_category.strip()))
                 conn.commit()
                 st.success(f"User '{new_user_id}' added successfully!")
                 st.cache_data.clear()
@@ -143,30 +143,34 @@ with tab3:
     tools_df = load_data_fresh()[1]
     tools_df['Title_clean'] = tools_df['Title'].str.lower().str.strip()
     selected_tool = st.selectbox("🔍 Select a Tool to Find Similar Ones", tools_df['Title'])
-    selected_specialty = st.text_input("🔍 Enter Your Specialty for Personalized Recommendations")
+    selected_category = st.text_input("🔍 Enter Your Category for Personalized Recommendations")
 
     selected_row = tools_df[tools_df['Title'] == selected_tool].iloc[0]
     st.markdown(f"### 🔧 You selected: {selected_row['Title']}")
     display_resized_image(selected_row['Image'])
 
-    # Similar Products Based on Attributes
-    def compute_similarity(row1, row2):
-        return sum([row1[col] == row2[col] for col in ['Material', 'Length', 'Use', 'Brand']])
+    st.subheader("🔗 Similar Products (Same Category):")
+    selected_category_from_tool = selected_row.get("Category", "").lower().strip()
 
-    st.subheader("🔗 Similar Products (Same Specs):")
-    sim_scores = tools_df.apply(lambda row: compute_similarity(selected_row, row), axis=1)
-    similar_products = tools_df.loc[sim_scores.sort_values(ascending=False).index[1:6]]
+    if selected_category_from_tool:
+        similar_products = tools_df[tools_df['Category'].str.lower().str.strip() == selected_category_from_tool]
+        similar_products = similar_products[similar_products['Title'] != selected_row['Title']].head(5)
 
-    for _, row in similar_products.iterrows():
-        st.markdown(f"### [{row['Title']}]({row['Title_URL']})")
-        display_resized_image(row['Image'])
-
-    if selected_specialty:
-        st.subheader(f"🩺 Products for Specialty: {selected_specialty}")
-        spec_prods = tools_df[tools_df['Specialty'].str.lower().str.contains(selected_specialty.lower())]
-        if spec_prods.empty:
-            st.info("No products found for this specialty.")
+        if similar_products.empty:
+            st.info("No similar products found in the same category.")
         else:
-            for _, row in spec_prods.head(5).iterrows():
+            for _, row in similar_products.iterrows():
+                st.markdown(f"### [{row['Title']}]({row['Title_URL']})")
+                display_resized_image(row['Image'])
+    else:
+        st.warning("Category information is missing for the selected tool.")
+
+    if selected_category:
+        st.subheader(f"🩺 Products for Category: {selected_category}")
+        cat_prods = tools_df[tools_df['Category'].str.lower().str.contains(selected_category.lower())]
+        if cat_prods.empty:
+            st.info("No products found for this category.")
+        else:
+            for _, row in cat_prods.head(5).iterrows():
                 st.markdown(f"### [{row['Title']}]({row['Title_URL']})")
                 display_resized_image(row['Image'])
