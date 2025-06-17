@@ -83,7 +83,7 @@ with tab1:
                         row = tools_df[tools_df['Title_clean'] == best_match].iloc[0]
                         st.markdown(f"### [{prod}]({row['Title_URL']})")
                         try:
-                            st.image(row['Image'], use_container_width=True)
+                            st.image(row['Image'], width=400)
                         except:
                             st.write("(Image unavailable)")
                     else:
@@ -133,7 +133,7 @@ with tab2:
                         row = tools_df[tools_df['Title_clean'] == best_match].iloc[0]
                         st.markdown(f"### [{prod}]({row['Title_URL']})")
                         try:
-                            st.image(row['Image'], use_container_width=True)
+                            st.image(row['Image'], width=400)
                         except:
                             st.write("(Image unavailable)")
                     else:
