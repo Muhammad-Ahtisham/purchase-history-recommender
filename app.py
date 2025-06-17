@@ -64,7 +64,7 @@ def similar_products_view(tools_df, selected_title):
     return tools_df.iloc[similar_indices[1:]]
 
 def products_by_specialty(tools_df, specialty):
-    return tools_df[tools_df['specialty'].str.lower() == specialty.lower()].head(5)
+    return tools_df[tools_df['category'].str.lower() == specialty.lower()].head(5)
 
 # ---------- TABS ----------
 tab1, tab2, tab3 = st.tabs(["📊 Recommend Products", "➕ Add New User", "🔍 Content-Based Suggestions"])
