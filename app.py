@@ -3,6 +3,7 @@ import pandas as pd
 import sqlite3
 from sklearn.metrics.pairwise import cosine_similarity
 from fuzzywuzzy import process
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 # ------------------ SETUP ------------------
 st.set_page_config(page_title="Product Recommendation", layout="centered")
@@ -15,13 +16,16 @@ cursor = conn.cursor()
 # ---------- INIT DB TABLES ----------
 cursor.execute('''CREATE TABLE IF NOT EXISTS users (
     userID TEXT PRIMARY KEY,
-    previousPurchases TEXT
+    previousPurchases TEXT,
+    specialty TEXT
 )''')
 
 cursor.execute('''CREATE TABLE IF NOT EXISTS tools (
     Title TEXT,
     Title_URL TEXT,
-    Image TEXT
+    Image TEXT,
+    Specifications TEXT,
+    Specialty TEXT
 )''')
 conn.commit()
 
@@ -49,8 +53,20 @@ def get_updated_data():
     product_choices = tools_df['Title_clean'].tolist()
     return df, tools_df, purchase_matrix, sim_df, product_choices
 
+# ---------- CONTENT-BASED FILTERING FUNCTIONS ----------
+def similar_products_view(tools_df, selected_title):
+    tfidf = TfidfVectorizer(stop_words='english')
+    specs_matrix = tfidf.fit_transform(tools_df['Specifications'].fillna(''))
+    idx = tools_df[tools_df['Title'] == selected_title].index[0]
+    cosine_sim = cosine_similarity(specs_matrix[idx], specs_matrix).flatten()
+    similar_indices = cosine_sim.argsort()[-6:][::-1]
+    return tools_df.iloc[similar_indices[1:]]
+
+def products_by_specialty(tools_df, specialty):
+    return tools_df[tools_df['Specialty'].str.lower() == specialty.lower()].head(5)
+
 # ---------- TABS ----------
-tab1, tab2 = st.tabs(["📊 Recommend Products", "➕ Add New User"])
+tab1, tab2, tab3 = st.tabs(["📊 Recommend Products", "➕ Add New User", "🔍 Content-Based Suggestions"])
 
 # ========== TAB 1: RECOMMENDATION ==========
 with tab1:
@@ -96,45 +112,47 @@ with tab2:
     st.write("## ➕ Create a New User Profile")
     new_user_id = st.text_input("🔹 Enter New User ID")
     new_user_purchases = st.text_input("🔹 Purchased tools (use '|' to separate multiple items):")
+    new_user_specialty = st.text_input("🔹 Medical Specialty (e.g., Orthopedic, Neuro):")
 
     if st.button("✅ Add User and Generate Recommendations"):
-        if new_user_id.strip() == "" or new_user_purchases.strip() == "":
-            st.warning("Please enter both User ID and purchase history.")
+        if new_user_id.strip() == "" or new_user_purchases.strip() == "" or new_user_specialty.strip() == "":
+            st.warning("Please enter all user details.")
         else:
-            # Check if user already exists
             cursor.execute("SELECT COUNT(*) FROM users WHERE userID=?", (new_user_id,))
             if cursor.fetchone()[0] > 0:
                 st.warning("User ID already exists. Please choose another one.")
             else:
-                cursor.execute("INSERT INTO users (userID, previousPurchases) VALUES (?, ?)",
-                               (new_user_id.strip(), new_user_purchases.strip()))
+                cursor.execute("INSERT INTO users (userID, previousPurchases, specialty) VALUES (?, ?, ?)",
+                               (new_user_id.strip(), new_user_purchases.strip(), new_user_specialty.strip()))
                 conn.commit()
                 st.success(f"User '{new_user_id}' added successfully!")
                 st.cache_data.clear()
 
-                # Reload and recommend
-                df, tools_df, purchase_matrix, sim_df, product_choices = get_updated_data()
-                sim_scores = sim_df[new_user_id].drop(new_user_id)
-                sim_scores = sim_scores[sim_scores > 0]
+# ========== TAB 3: CONTENT-BASED ==========
+with tab3:
+    df, tools_df, *_ = get_updated_data()
+    st.write("## 🧠 Content-Based Product Filtering")
+    tool_titles = tools_df['Title'].tolist()
+    selected_tool = st.selectbox("🔎 Select a tool to find similar ones", tool_titles)
 
-                if sim_scores.empty:
-                    st.info("No similar users found. Showing most popular tools instead.")
-                    top_products = purchase_matrix.sum().sort_values(ascending=False).head(5)
-                else:
-                    weighted_scores = purchase_matrix.loc[sim_scores.index].T.dot(sim_scores)
-                    user_vector = purchase_matrix.loc[new_user_id]
-                    new_scores = weighted_scores[user_vector == 0]
-                    top_products = new_scores.sort_values(ascending=False).head(5)
+    if selected_tool:
+        st.subheader("🔁 Similar Products")
+        similar_df = similar_products_view(tools_df, selected_tool)
+        for _, row in similar_df.iterrows():
+            st.markdown(f"### [{row['Title']}]({row['Title_URL']})")
+            try:
+                st.image(row['Image'], width=400)
+            except:
+                st.write("(Image unavailable)")
 
-                st.subheader(f"🎁 Top 5 Recommendations for {new_user_id}:")
-                for prod in top_products.index:
-                    best_match = find_best_match(prod, product_choices)
-                    if best_match:
-                        row = tools_df[tools_df['Title_clean'] == best_match].iloc[0]
-                        st.markdown(f"### [{prod}]({row['Title_URL']})")
-                        try:
-                            st.image(row['Image'], width=400)
-                        except:
-                            st.write("(Image unavailable)")
-                    else:
-                        st.write(f"- {prod} (No match found)")
+    st.markdown("---")
+    specialty_input = st.text_input("🩺 Enter a medical specialty to get recommended tools")
+    if specialty_input:
+        st.subheader(f"🔧 Tools for '{specialty_input}' Specialty")
+        spec_df = products_by_specialty(tools_df, specialty_input)
+        for _, row in spec_df.iterrows():
+            st.markdown(f"### [{row['Title']}]({row['Title_URL']})")
+            try:
+                st.image(row['Image'], width=400)
+            except:
+                st.write("(Image unavailable)")
