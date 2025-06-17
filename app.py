@@ -1,13 +1,11 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
+import requests
+from PIL import Image
+from io import BytesIO
 from sklearn.metrics.pairwise import cosine_similarity
 from fuzzywuzzy import process
-
-# For content-based filtering
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.preprocessing import MinMaxScaler
-import numpy as np
 
 # ------------------ SETUP ------------------
 st.set_page_config(page_title="Product Recommendation", layout="centered")
@@ -28,25 +26,40 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS tools (
     Title_URL TEXT,
     Image TEXT,
     Category TEXT,
+    Brand TEXT,
+    Material TEXT,
+    Length TEXT,
     Price REAL
 )''')
 conn.commit()
 
-# ---------- LOAD DATA FROM DATABASE ----------
+# ---------- IMAGE DISPLAY FUNCTION ----------
+def display_resized_image(image_url, max_width=300):
+    try:
+        response = requests.get(image_url)
+        img = Image.open(BytesIO(response.content))
+        w_percent = max_width / float(img.size[0])
+        h_size = int((float(img.size[1]) * float(w_percent)))
+        img = img.resize((max_width, h_size), Image.LANCZOS)
+        st.image(img, use_column_width=False)
+    except Exception as e:
+        st.write("🖼️ Image unavailable")
+
+# ---------- LOAD DATA ----------
 @st.cache_data(show_spinner=False)
 def load_data_fresh():
     user_df = pd.read_sql_query("SELECT * FROM users", conn)
     tools_df = pd.read_sql_query("SELECT * FROM tools", conn)
     return user_df, tools_df
 
-# ---------- FIND MATCH FUNCTION ----------
+# ---------- FIND MATCH ----------
 def find_best_match(prod_name, choices, threshold=70):
     match, score = process.extractOne(prod_name.lower().strip(), choices)
     if score >= threshold:
         return match
     return None
 
-# ---------- DATA PIPELINE FUNCTION ----------
+# ---------- DATA PIPELINE ----------
 def get_updated_data():
     df, tools_df = load_data_fresh()
     purchase_matrix = df.set_index('userID')['previousPurchases'].str.get_dummies(sep='|')
@@ -57,9 +70,9 @@ def get_updated_data():
     return df, tools_df, purchase_matrix, sim_df, product_choices
 
 # ---------- TABS ----------
-tab1, tab2, tab3 = st.tabs(["📊 Recommend Products", "➕ Add New User", "🧠 Content-Based Filter"])
+tab1, tab2, tab3 = st.tabs(["📊 Recommend Products", "➕ Add New User", "🔍 Content-Based Filter"])
 
-# ========== TAB 1: RECOMMENDATION ==========
+# ========== TAB 1: USER-BASED ==========
 with tab1:
     df, tools_df, purchase_matrix, sim_df, product_choices = get_updated_data()
     st.write("## 📌 User-Based Product Recommendations")
@@ -89,10 +102,7 @@ with tab1:
                     if best_match:
                         row = tools_df[tools_df['Title_clean'] == best_match].iloc[0]
                         st.markdown(f"### [{prod}]({row['Title_URL']})")
-                        try:
-                            st.image(row['Image'], use_container_width=True)
-                        except:
-                            st.write("(Image unavailable)")
+                        display_resized_image(row['Image'])
                     else:
                         st.write(f"- {prod} (No match found)")
     else:
@@ -137,44 +147,47 @@ with tab2:
                     if best_match:
                         row = tools_df[tools_df['Title_clean'] == best_match].iloc[0]
                         st.markdown(f"### [{prod}]({row['Title_URL']})")
-                        try:
-                            st.image(row['Image'], use_container_width=True)
-                        except:
-                            st.write("(Image unavailable)")
+                        display_resized_image(row['Image'])
                     else:
                         st.write(f"- {prod} (No match found)")
 
-# ========== TAB 3: CONTENT-BASED FILTERING ==========
+# ========== TAB 3: CONTENT-BASED ==========
 with tab3:
-    st.write("## 🧠 Content-Based Product Suggestions")
+    df, tools_df, *_ = get_updated_data()
+    st.write("## 🧠 Content-Based Filtering")
 
-    _, tools_df = load_data_fresh()
-    tools_df = tools_df.dropna(subset=["Title", "Category"])
+    product_names = tools_df['Title'].tolist()
+    selected_product = st.selectbox("🔍 Select a product to view similar ones:", product_names)
 
-    selected_title = st.selectbox("🔍 Choose a product to find similar ones:", tools_df["Title"])
-    specialty = st.selectbox("🩺 Select your medical specialty (Category):", sorted(tools_df["Category"].unique()))
+    if selected_product:
+        current = tools_df[tools_df['Title'] == selected_product].iloc[0]
+        st.markdown(f"### Currently Viewing: [{selected_product}]({current['Title_URL']})")
+        display_resized_image(current['Image'])
 
-    tfidf = TfidfVectorizer(stop_words="english")
-    tfidf_matrix = tfidf.fit_transform(tools_df["Title"] + " " + tools_df["Category"])
+        st.subheader("🧩 Similar Products:")
+        candidates = tools_df[tools_df['Title'] != selected_product].copy()
 
-    scaler = MinMaxScaler()
-    price_scaled = scaler.fit_transform(tools_df[["Price"]].fillna(0))
+        def compute_similarity(row):
+            sim_score = 0
+            sim_score += (row['Category'] == current['Category']) * 3
+            sim_score += (row['Brand'] == current['Brand']) * 2
+            sim_score += (row['Material'] == current['Material']) * 1
+            sim_score += (row['Length'] == current['Length']) * 1
+            price_diff = abs(float(row['Price']) - float(current['Price'])) if pd.notnull(row['Price']) else 1000
+            sim_score -= price_diff / 100
+            return sim_score
 
-    combined_features = np.hstack([tfidf_matrix.toarray(), price_scaled])
-    sim_matrix = cosine_similarity(combined_features)
+        candidates['similarity'] = candidates.apply(compute_similarity, axis=1)
+        top_similar = candidates.sort_values(by='similarity', ascending=False).head(5)
 
-    index = tools_df[tools_df["Title"] == selected_title].index[0]
-    sim_scores = list(enumerate(sim_matrix[index]))
-    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)[1:6]
+        for _, row in top_similar.iterrows():
+            st.markdown(f"### [{row['Title']}]({row['Title_URL']})")
+            display_resized_image(row['Image'])
 
-    st.subheader("🔁 Similar Products:")
-    for idx, score in sim_scores:
-        row = tools_df.iloc[idx]
-        st.markdown(f"### [{row['Title']}]({row['Title_URL']})\nCategory: *{row['Category']}*  \n💰 Price: ${row['Price']:.2f}")
-        st.image(row['Image'], use_container_width=True)
+        st.subheader("🩺 Products for Your Specialty")
+        specialty = st.selectbox("Choose Specialty (Category)", sorted(tools_df['Category'].dropna().unique()))
+        filtered = tools_df[tools_df['Category'] == specialty]
 
-    st.subheader("💼 Specialty-Specific Tools:")
-    spec_tools = tools_df[tools_df["Category"] == specialty].head(5)
-    for _, row in spec_tools.iterrows():
-        st.markdown(f"### [{row['Title']}]({row['Title_URL']})\n💰 Price: ${row['Price']:.2f}")
-        st.image(row['Image'], use_container_width=True)
+        for _, row in filtered.head(5).iterrows():
+            st.markdown(f"### [{row['Title']}]({row['Title_URL']})")
+            display_resized_image(row['Image'])
