@@ -1,11 +1,11 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
+from sklearn.metrics.pairwise import cosine_similarity
+from fuzzywuzzy import process
 import requests
 from PIL import Image
 from io import BytesIO
-from sklearn.metrics.pairwise import cosine_similarity
-from fuzzywuzzy import process
 
 # ------------------ SETUP ------------------
 st.set_page_config(page_title="Product Recommendation", layout="centered")
@@ -21,19 +21,40 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS users (
     previousPurchases TEXT
 )''')
 
+# Ensure 'category' column exists in 'users' table
+try:
+    cursor.execute("ALTER TABLE users ADD COLUMN category TEXT")
+    conn.commit()
+except sqlite3.OperationalError:
+    pass  # Column already exists
+
 cursor.execute('''CREATE TABLE IF NOT EXISTS tools (
     Title TEXT,
     Title_URL TEXT,
     Image TEXT,
-    Category TEXT,
-    Brand TEXT,
     Material TEXT,
     Length TEXT,
-    Price REAL
+    Use TEXT,
+    Brand TEXT,
+    Category TEXT
 )''')
 conn.commit()
 
-# ---------- IMAGE DISPLAY FUNCTION ----------
+# ---------- LOAD DATA FROM DATABASE ----------
+@st.cache_data(show_spinner=False)
+def load_data_fresh():
+    user_df = pd.read_sql_query("SELECT * FROM users", conn)
+    tools_df = pd.read_sql_query("SELECT * FROM tools", conn)
+    return user_df, tools_df
+
+# ---------- FIND MATCH FUNCTION ----------
+def find_best_match(prod_name, choices, threshold=70):
+    match, score = process.extractOne(prod_name.lower().strip(), choices)
+    if score >= threshold:
+        return match
+    return None
+
+# ---------- IMAGE DISPLAY ----------
 def display_resized_image(image_url, max_width=300):
     try:
         response = requests.get(image_url)
@@ -41,25 +62,11 @@ def display_resized_image(image_url, max_width=300):
         w_percent = max_width / float(img.size[0])
         h_size = int((float(img.size[1]) * float(w_percent)))
         img = img.resize((max_width, h_size), Image.LANCZOS)
-        st.image(img, use_column_width=False)
-    except Exception as e:
+        st.image(img, use_container_width=False)
+    except:
         st.write("🖼️ Image unavailable")
 
-# ---------- LOAD DATA ----------
-@st.cache_data(show_spinner=False)
-def load_data_fresh():
-    user_df = pd.read_sql_query("SELECT * FROM users", conn)
-    tools_df = pd.read_sql_query("SELECT * FROM tools", conn)
-    return user_df, tools_df
-
-# ---------- FIND MATCH ----------
-def find_best_match(prod_name, choices, threshold=70):
-    match, score = process.extractOne(prod_name.lower().strip(), choices)
-    if score >= threshold:
-        return match
-    return None
-
-# ---------- DATA PIPELINE ----------
+# ---------- DATA PIPELINE FUNCTION ----------
 def get_updated_data():
     df, tools_df = load_data_fresh()
     purchase_matrix = df.set_index('userID')['previousPurchases'].str.get_dummies(sep='|')
@@ -70,9 +77,9 @@ def get_updated_data():
     return df, tools_df, purchase_matrix, sim_df, product_choices
 
 # ---------- TABS ----------
-tab1, tab2, tab3 = st.tabs(["📊 Recommend Products", "➕ Add New User", "🔍 Content-Based Filter"])
+tab1, tab2, tab3 = st.tabs(["📊 Recommend Products", "➕ Add New User", "🧠 Content-Based Suggestions"])
 
-# ========== TAB 1: USER-BASED ==========
+# ========== TAB 1: USER-BASED RECOMMENDATION ==========
 with tab1:
     df, tools_df, purchase_matrix, sim_df, product_choices = get_updated_data()
     st.write("## 📌 User-Based Product Recommendations")
@@ -113,81 +120,57 @@ with tab2:
     st.write("## ➕ Create a New User Profile")
     new_user_id = st.text_input("🔹 Enter New User ID")
     new_user_purchases = st.text_input("🔹 Purchased tools (use '|' to separate multiple items):")
+    new_user_category = st.text_input("🔹 Enter Tool Category (e.g., Cutting, Grasping)")
 
     if st.button("✅ Add User and Generate Recommendations"):
-        if new_user_id.strip() == "" or new_user_purchases.strip() == "":
-            st.warning("Please enter both User ID and purchase history.")
+        if new_user_id.strip() == "" or new_user_purchases.strip() == "" or new_user_category.strip() == "":
+            st.warning("Please enter User ID, purchases, and category.")
         else:
             cursor.execute("SELECT COUNT(*) FROM users WHERE userID=?", (new_user_id,))
             if cursor.fetchone()[0] > 0:
                 st.warning("User ID already exists. Please choose another one.")
             else:
-                cursor.execute("INSERT INTO users (userID, previousPurchases) VALUES (?, ?)",
-                               (new_user_id.strip(), new_user_purchases.strip()))
+                cursor.execute("INSERT INTO users (userID, previousPurchases, category) VALUES (?, ?, ?)",
+                               (new_user_id.strip(), new_user_purchases.strip(), new_user_category.strip()))
                 conn.commit()
                 st.success(f"User '{new_user_id}' added successfully!")
                 st.cache_data.clear()
 
-                df, tools_df, purchase_matrix, sim_df, product_choices = get_updated_data()
-                sim_scores = sim_df[new_user_id].drop(new_user_id)
-                sim_scores = sim_scores[sim_scores > 0]
-
-                if sim_scores.empty:
-                    st.info("No similar users found. Showing most popular tools instead.")
-                    top_products = purchase_matrix.sum().sort_values(ascending=False).head(5)
-                else:
-                    weighted_scores = purchase_matrix.loc[sim_scores.index].T.dot(sim_scores)
-                    user_vector = purchase_matrix.loc[new_user_id]
-                    new_scores = weighted_scores[user_vector == 0]
-                    top_products = new_scores.sort_values(ascending=False).head(5)
-
-                st.subheader(f"🎁 Top 5 Recommendations for {new_user_id}:")
-                for prod in top_products.index:
-                    best_match = find_best_match(prod, product_choices)
-                    if best_match:
-                        row = tools_df[tools_df['Title_clean'] == best_match].iloc[0]
-                        st.markdown(f"### [{prod}]({row['Title_URL']})")
-                        display_resized_image(row['Image'])
-                    else:
-                        st.write(f"- {prod} (No match found)")
-
-# ========== TAB 3: CONTENT-BASED ==========
+# ========== TAB 3: CONTENT-BASED FILTERING ==========
 with tab3:
-    df, tools_df, *_ = get_updated_data()
     st.write("## 🧠 Content-Based Filtering")
 
-    product_names = tools_df['Title'].tolist()
-    selected_product = st.selectbox("🔍 Select a product to view similar ones:", product_names)
+    tools_df = load_data_fresh()[1]
+    tools_df['Title_clean'] = tools_df['Title'].str.lower().str.strip()
+    selected_tool = st.selectbox("🔍 Select a Tool to Find Similar Ones", tools_df['Title'])
+    selected_category = st.text_input("🔍 Enter Your Category for Personalized Recommendations")
 
-    if selected_product:
-        current = tools_df[tools_df['Title'] == selected_product].iloc[0]
-        st.markdown(f"### Currently Viewing: [{selected_product}]({current['Title_URL']})")
-        display_resized_image(current['Image'])
+    selected_row = tools_df[tools_df['Title'] == selected_tool].iloc[0]
+    st.markdown(f"### 🔧 You selected: {selected_row['Title']}")
+    display_resized_image(selected_row['Image'])
 
-        st.subheader("🧩 Similar Products:")
-        candidates = tools_df[tools_df['Title'] != selected_product].copy()
+    st.subheader("🔗 Similar Products (Same Category):")
+    selected_category_from_tool = selected_row.get("Category", "").lower().strip()
 
-        def compute_similarity(row):
-            sim_score = 0
-            sim_score += (row['Category'] == current['Category']) * 3
-            sim_score += (row['Brand'] == current['Brand']) * 2
-            sim_score += (row['Material'] == current['Material']) * 1
-            sim_score += (row['Length'] == current['Length']) * 1
-            price_diff = abs(float(row['Price']) - float(current['Price'])) if pd.notnull(row['Price']) else 1000
-            sim_score -= price_diff / 100
-            return sim_score
+    if selected_category_from_tool:
+        similar_products = tools_df[tools_df['Category'].str.lower().str.strip() == selected_category_from_tool]
+        similar_products = similar_products[similar_products['Title'] != selected_row['Title']].head(5)
 
-        candidates['similarity'] = candidates.apply(compute_similarity, axis=1)
-        top_similar = candidates.sort_values(by='similarity', ascending=False).head(5)
+        if similar_products.empty:
+            st.info("No similar products found in the same category.")
+        else:
+            for _, row in similar_products.iterrows():
+                st.markdown(f"### [{row['Title']}]({row['Title_URL']})")
+                display_resized_image(row['Image'])
+    else:
+        st.warning("Category information is missing for the selected tool.")
 
-        for _, row in top_similar.iterrows():
-            st.markdown(f"### [{row['Title']}]({row['Title_URL']})")
-            display_resized_image(row['Image'])
-
-        st.subheader("🩺 Products for Your Specialty")
-        specialty = st.selectbox("Choose Specialty (Category)", sorted(tools_df['Category'].dropna().unique()))
-        filtered = tools_df[tools_df['Category'] == specialty]
-
-        for _, row in filtered.head(5).iterrows():
-            st.markdown(f"### [{row['Title']}]({row['Title_URL']})")
-            display_resized_image(row['Image'])
+    if selected_category:
+        st.subheader(f"🩺 Products for Category: {selected_category}")
+        cat_prods = tools_df[tools_df['Category'].str.lower().str.contains(selected_category.lower())]
+        if cat_prods.empty:
+            st.info("No products found for this category.")
+        else:
+            for _, row in cat_prods.head(5).iterrows():
+                st.markdown(f"### [{row['Title']}]({row['Title_URL']})")
+                display_resized_image(row['Image'])
