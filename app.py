@@ -18,15 +18,9 @@ cursor = conn.cursor()
 # ---------- INIT DB TABLES ----------
 cursor.execute('''CREATE TABLE IF NOT EXISTS users (
     userID TEXT PRIMARY KEY,
-    previousPurchases TEXT
+    previousPurchases TEXT,
+    category TEXT
 )''')
-
-# Ensure 'category' column exists in 'users' table
-try:
-    cursor.execute("ALTER TABLE users ADD COLUMN category TEXT")
-    conn.commit()
-except sqlite3.OperationalError:
-    pass  # Column already exists
 
 cursor.execute('''CREATE TABLE IF NOT EXISTS tools (
     Title TEXT,
@@ -47,24 +41,37 @@ def load_data_fresh():
     tools_df = pd.read_sql_query("SELECT * FROM tools", conn)
     return user_df, tools_df
 
-# ---------- FIND MATCH FUNCTION ----------
+# ---------- MATCHING FUNCTION ----------
 def find_best_match(prod_name, choices, threshold=70):
     match, score = process.extractOne(prod_name.lower().strip(), choices)
     if score >= threshold:
         return match
     return None
 
-# ---------- IMAGE DISPLAY ----------
+# ---------- DISPLAY IMAGE FUNCTION ----------
 def display_resized_image(image_url, max_width=300):
+    fallback_url = "https://via.placeholder.com/300x200.png?text=No+Image"
     try:
-        response = requests.get(image_url)
-        img = Image.open(BytesIO(response.content))
+        if not image_url or not image_url.startswith("http"):
+            image_url = fallback_url
+
+        response = requests.get(image_url, timeout=5)
+        response.raise_for_status()
+
+        if "image" not in response.headers.get("Content-Type", ""):
+            image_url = fallback_url
+            response = requests.get(image_url, timeout=5)
+
+        img = Image.open(BytesIO(response.content)).convert("RGB")
         w_percent = max_width / float(img.size[0])
         h_size = int((float(img.size[1]) * float(w_percent)))
         img = img.resize((max_width, h_size), Image.LANCZOS)
         st.image(img, use_container_width=False)
+
     except:
-        st.write("🖼️ Image unavailable")
+        response = requests.get(fallback_url, timeout=5)
+        img = Image.open(BytesIO(response.content)).convert("RGB")
+        st.image(img, use_container_width=False)
 
 # ---------- DATA PIPELINE FUNCTION ----------
 def get_updated_data():
@@ -77,7 +84,12 @@ def get_updated_data():
     return df, tools_df, purchase_matrix, sim_df, product_choices
 
 # ---------- TABS ----------
-tab1, tab2, tab3 = st.tabs(["📊 Recommend Products", "➕ Add New User", "🧠 Content-Based Suggestions"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📊 Recommend Products", 
+    "➕ Add New User", 
+    "🧠 Content-Based Suggestions", 
+    "🛠 Admin Tools"
+])
 
 # ========== TAB 1: USER-BASED RECOMMENDATION ==========
 with tab1:
@@ -174,3 +186,36 @@ with tab3:
             for _, row in cat_prods.head(5).iterrows():
                 st.markdown(f"### [{row['Title']}]({row['Title_URL']})")
                 display_resized_image(row['Image'])
+
+# ========== TAB 4: ADMIN TOOLS ==========
+with tab4:
+    st.write("## 🛠 Admin Tools: Fix Broken Image URLs")
+
+    if st.button("🔍 Scan and Fix Broken Image URLs"):
+        placeholder_url = "https://via.placeholder.com/300x200.png?text=No+Image"
+        cursor.execute("SELECT rowid, Title, Image FROM tools")
+        rows = cursor.fetchall()
+
+        broken_count = 0
+        for rowid, title, image_url in rows:
+            try:
+                if not image_url or not image_url.startswith("http"):
+                    raise ValueError("Invalid URL")
+
+                response = requests.get(image_url, timeout=5)
+                response.raise_for_status()
+
+                if "image" not in response.headers.get("Content-Type", ""):
+                    raise ValueError("URL is not an image")
+
+            except Exception as e:
+                st.warning(f"🔴 Replacing broken image for **{title}** | Error: {str(e)}")
+                cursor.execute("UPDATE tools SET Image=? WHERE rowid=?", (placeholder_url, rowid))
+                broken_count += 1
+
+        conn.commit()
+
+        if broken_count == 0:
+            st.success("✅ All image URLs are valid. No changes made.")
+        else:
+            st.success(f"🔧 Fixed {broken_count} broken image URL(s) with placeholder.")
