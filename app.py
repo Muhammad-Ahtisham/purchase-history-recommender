@@ -1,4 +1,4 @@
-import streamlit as stMore actions
+import streamlit as st
 import pandas as pd
 import sqlite3
 from sklearn.metrics.pairwise import cosine_similarity
