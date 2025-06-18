@@ -6,7 +6,6 @@ from fuzzywuzzy import process
 import requests
 from PIL import Image
 from io import BytesIO
-import os
 
 # ------------------ SETUP ------------------
 st.set_page_config(page_title="Product Recommendation", layout="centered")
@@ -19,9 +18,15 @@ cursor = conn.cursor()
 # ---------- INIT DB TABLES ----------
 cursor.execute('''CREATE TABLE IF NOT EXISTS users (
     userID TEXT PRIMARY KEY,
-    previousPurchases TEXT,
-    category TEXT
+    previousPurchases TEXT
 )''')
+
+# Ensure 'category' column exists in 'users' table
+try:
+    cursor.execute("ALTER TABLE users ADD COLUMN category TEXT")
+    conn.commit()
+except sqlite3.OperationalError:
+    pass  # Column already exists
 
 cursor.execute('''CREATE TABLE IF NOT EXISTS tools (
     Title TEXT,
@@ -42,32 +47,24 @@ def load_data_fresh():
     tools_df = pd.read_sql_query("SELECT * FROM tools", conn)
     return user_df, tools_df
 
-# ---------- IMAGE DISPLAY ----------
-def display_resized_image(image_url, max_width=300):
-    try:
-        if not image_url or not image_url.startswith("http"):
-            raise ValueError("Invalid URL")
-
-        response = requests.get(image_url, timeout=5)
-        response.raise_for_status()
-
-        if "image" not in response.headers.get("Content-Type", ""):
-            raise ValueError("Not an image")
-
-        img = Image.open(BytesIO(response.content)).convert("RGB")
-    except Exception:
-        # Load fallback image
-        img = Image.open("placeholder.png").convert("RGB")
-
-    w_percent = max_width / float(img.size[0])
-    h_size = int((float(img.size[1]) * float(w_percent)))
-    img = img.resize((max_width, h_size), Image.LANCZOS)
-    st.image(img, use_container_width=False)
-
 # ---------- FIND MATCH FUNCTION ----------
 def find_best_match(prod_name, choices, threshold=70):
     match, score = process.extractOne(prod_name.lower().strip(), choices)
-    return match if score >= threshold else None
+    if score >= threshold:
+        return match
+    return None
+
+# ---------- IMAGE DISPLAY ----------
+def display_resized_image(image_url, max_width=300):
+    try:
+        response = requests.get(image_url)
+        img = Image.open(BytesIO(response.content))
+        w_percent = max_width / float(img.size[0])
+        h_size = int((float(img.size[1]) * float(w_percent)))
+        img = img.resize((max_width, h_size), Image.LANCZOS)
+        st.image(img, use_container_width=False)
+    except:
+        st.write("🖼️ Image unavailable")
 
 # ---------- DATA PIPELINE FUNCTION ----------
 def get_updated_data():
