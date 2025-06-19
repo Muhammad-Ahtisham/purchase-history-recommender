@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
+import mysql.connector
+from sqlalchemy import create_engine
 from sklearn.metrics.pairwise import cosine_similarity
 from fuzzywuzzy import process
 import requests
@@ -12,39 +13,20 @@ st.set_page_config(page_title="Product Recommendation", layout="centered")
 st.title("🔍 Surgical Tool Recommendation System")
 
 # ---------- DATABASE CONNECTION ----------
-conn = sqlite3.connect("recommendation.db", check_same_thread=False)
-cursor = conn.cursor()
-
-# ---------- INIT DB TABLES ----------
-cursor.execute('''CREATE TABLE IF NOT EXISTS users (
-    userID TEXT PRIMARY KEY,
-    previousPurchases TEXT
-)''')
-
-# Ensure 'category' column exists in 'users' table
-try:
-    cursor.execute("ALTER TABLE users ADD COLUMN category TEXT")
-    conn.commit()
-except sqlite3.OperationalError:
-    pass  # Column already exists
-
-cursor.execute('''CREATE TABLE IF NOT EXISTS tools (
-    Title TEXT,
-    Title_URL TEXT,
-    Image TEXT,
-    Material TEXT,
-    Length TEXT,
-    Use TEXT,
-    Brand TEXT,
-    Category TEXT
-)''')
-conn.commit()
+conn = mysql.connector.connect(
+    host="localhost",
+    user="root",
+    password="",  # use your MySQL password here if any
+    database="macromed_ecommerce"
+)
+cursor = conn.cursor(dictionary=True)
+engine = create_engine("mysql+mysqlconnector://root:@localhost/macromed_ecommerce")
 
 # ---------- LOAD DATA FROM DATABASE ----------
 @st.cache_data(show_spinner=False)
 def load_data_fresh():
-    user_df = pd.read_sql_query("SELECT * FROM users", conn)
-    tools_df = pd.read_sql_query("SELECT * FROM tools", conn)
+    user_df = pd.read_sql("SELECT * FROM users", con=engine)
+    tools_df = pd.read_sql("SELECT * FROM tools", con=engine)
     return user_df, tools_df
 
 # ---------- FIND MATCH FUNCTION ----------
@@ -126,11 +108,11 @@ with tab2:
         if new_user_id.strip() == "" or new_user_purchases.strip() == "" or new_user_category.strip() == "":
             st.warning("Please enter User ID, purchases, and category.")
         else:
-            cursor.execute("SELECT COUNT(*) FROM users WHERE userID=?", (new_user_id,))
-            if cursor.fetchone()[0] > 0:
+            cursor.execute("SELECT COUNT(*) FROM users WHERE userID=%s", (new_user_id,))
+            if cursor.fetchone()["COUNT(*)"] > 0:
                 st.warning("User ID already exists. Please choose another one.")
             else:
-                cursor.execute("INSERT INTO users (userID, previousPurchases, category) VALUES (?, ?, ?)",
+                cursor.execute("INSERT INTO users (userID, previousPurchases, category) VALUES (%s, %s, %s)",
                                (new_user_id.strip(), new_user_purchases.strip(), new_user_category.strip()))
                 conn.commit()
                 st.success(f"User '{new_user_id}' added successfully!")
