@@ -17,7 +17,7 @@ conn = mysql.connector.connect(
     host="localhost",
     user="root",
     password="",  # use your MySQL password here if any
-    database="macromed_ecommerce"
+    database="macromed"
 )
 cursor = conn.cursor(dictionary=True)
 engine = create_engine("mysql+mysqlconnector://root:@localhost/macromed_ecommerce")
