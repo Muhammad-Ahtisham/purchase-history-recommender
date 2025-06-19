@@ -1,6 +1,9 @@
 streamlit
 pandas
-numpy
+mysql-connector-python
+sqlalchemy
 scikit-learn
-fuzzywuzzy[speedup]
-openpyxl
+fuzzywuzzy
+python-Levenshtein
+pillow
+requests
