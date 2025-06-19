@@ -36,7 +36,7 @@ if 'category' not in columns:
         
     )''')
     for _, row in existing_data.iterrows():
-        cursor.execute("INSERT INTO users (userID, previousPurchases) VALUES (?, ?)", (new_user_id.strip(), new_user_purchases.strip()))))
+        cursor.execute("INSERT INTO users (userID, previousPurchases) VALUES (?, ?)", (new_user_id.strip(), new_user_purchases.strip()))
     conn.commit()
 
 # ---------- Q-LEARNING SETUP ----------
