@@ -11,11 +11,7 @@ import pickle
 import os
 import random
 from io import BytesIO
-from collections import defaultdict
-import numpy as np
-import pickle
-import os
-import random
+
 # ------------------ SETUP ------------------
 st.set_page_config(page_title="Product Recommendation", layout="centered")
 st.title("🔍 Surgical Tool Recommendation System")
@@ -27,17 +23,24 @@ cursor = conn.cursor()
 # ---------- FIX SCHEMA IF NEEDED ----------
 cursor.execute("PRAGMA table_info(users)")
 columns = [col[1] for col in cursor.fetchall()]
-if 'category' not in columns:
-    existing_data = pd.read_sql_query("SELECT * FROM users", conn)
-    cursor.execute("DROP TABLE IF EXISTS users")
-    cursor.execute('''CREATE TABLE users (
-        userID TEXT PRIMARY KEY,
-        previousPurchases TEXT,
-        
-    )''')
-    for _, row in existing_data.iterrows():
-        cursor.execute("INSERT INTO users (userID, previousPurchases) VALUES (?, ?)", (new_user_id.strip(), new_user_purchases.strip()))
-    conn.commit()
+
+try:
+    if 'category' in columns:
+        existing_data = pd.read_sql_query("SELECT userID, previousPurchases FROM users", conn)
+    else:
+        existing_data = pd.read_sql_query("SELECT * FROM users", conn)
+except Exception:
+    existing_data = pd.DataFrame(columns=["userID", "previousPurchases"])
+
+cursor.execute("DROP TABLE IF EXISTS users")
+cursor.execute('''CREATE TABLE users (
+    userID TEXT PRIMARY KEY,
+    previousPurchases TEXT
+)''')
+
+for _, row in existing_data.iterrows():
+    cursor.execute("INSERT INTO users (userID, previousPurchases) VALUES (?, ?)", (row['userID'].strip(), row['previousPurchases'].strip()))
+conn.commit()
 
 # ---------- Q-LEARNING SETUP ----------
 q_table = defaultdict(lambda: defaultdict(float))
@@ -72,8 +75,7 @@ load_q_table()
 # ---------- INIT DB TABLES ----------
 cursor.execute('''CREATE TABLE IF NOT EXISTS users (
     userID TEXT PRIMARY KEY,
-    previousPurchases TEXT,
-    
+    previousPurchases TEXT
 )''')
 
 cursor.execute('''CREATE TABLE IF NOT EXISTS tools (
@@ -96,36 +98,6 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS feedback (
 
 conn.commit()
 
-# ---------- Q-LEARNING SETUP ----------
-q_table = defaultdict(lambda: defaultdict(float))
-alpha = 0.1  # learning rate
-gamma = 0.9  # discount factor
-epsilon = 0.2  # exploration rate
-Q_TABLE_PATH = "q_table.pkl"
-
-# ---------- Q-LEARNING FUNCTIONS ----------
-def update_q_value(user_id, tool_title, reward):
-    state = user_id
-    action = tool_title
-    current_q = q_table[state][action]
-    next_max = max(q_table[state].values()) if q_table[state] else 0
-    new_q = current_q + alpha * (reward + gamma * next_max - current_q)
-    q_table[state][action] = new_q
-    save_q_table()
-
-def save_q_table():
-    with open(Q_TABLE_PATH, "wb") as f:
-        pickle.dump(dict(q_table), f)
-
-def load_q_table():
-    global q_table
-    if os.path.exists(Q_TABLE_PATH):
-        with open(Q_TABLE_PATH, "rb") as f:
-            data = pickle.load(f)
-            q_table = defaultdict(lambda: defaultdict(float), data)
-
-load_q_table()
-
 # ---------- LOAD DATA ----------
 @st.cache_data(show_spinner=False)
 def load_data_fresh():
@@ -139,7 +111,6 @@ def retrain_model():
     purchase_matrix = df.set_index('userID')['previousPurchases'].str.get_dummies(sep='|')
     sim_matrix = cosine_similarity(purchase_matrix.values)
     sim_df = pd.DataFrame(sim_matrix, index=purchase_matrix.index, columns=purchase_matrix.index)
-    # update global state if needed here
     return df, tools_df, purchase_matrix, sim_df
 
 def find_best_match(prod_name, choices, threshold=70):
@@ -160,9 +131,9 @@ def display_resized_image(image_url, max_width=300):
         st.write("🖼️ Image unavailable")
 
 # ---------- TABS ----------
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Recommend Products", "➕ Add New User", "🧠 Content-Based Suggestions", "📋 Feedback History"])
+tab1, tab2, tab3, tab4 = st.tabs(["📊 Recommend Products", "➕ Add New User", "🧐 Content-Based Suggestions", "📋 Feedback History"])
 
-# ========== TAB 1 ==========
+# ========== TAB 1: Recommend Products ==========
 with tab1:
     df, tools_df, purchase_matrix, sim_df = retrain_model()
     tools_df['Title_clean'] = tools_df['Title'].str.lower().str.strip()
@@ -192,7 +163,6 @@ with tab1:
             if len(q_ranked_tools) >= 5:
                 top5 = q_ranked_tools[:5]
             else:
-                # Exploration
                 if new_scores.empty:
                     top5 = []
                 elif random.random() < epsilon:
@@ -219,28 +189,22 @@ with tab1:
                         st.markdown(f"### [{prod}]({row['Title_URL']})")
                         display_resized_image(row['Image'])
 
-                        feedback_key_pos = f"{selected_user}_{prod}_pos"
-                        feedback_key_neg = f"{selected_user}_{prod}_neg"
-
                         col1, col2 = st.columns(2)
-                        with col1:
-                            if st.button("👍 Mark as Useful", key=feedback_key_pos):
-                                cursor.execute("INSERT OR REPLACE INTO feedback (userID, toolTitle, reward) VALUES (?, ?, ?)",
-                                               (selected_user, prod, 1))
-                                conn.commit()
-                                update_q_value(selected_user, prod, 1)
-                                st.success(f"✅ Positive feedback recorded for '{prod}'!")
-                        with col2:
-                            if st.button("👎 Mark as Not Useful", key=feedback_key_neg):
-                                cursor.execute("INSERT OR REPLACE INTO feedback (userID, toolTitle, reward) VALUES (?, ?, ?)",
-                                               (selected_user, prod, -1))
-                                conn.commit()
-                                update_q_value(selected_user, prod, -1)
-                                st.warning(f"❌ Negative feedback recorded for '{prod}'!")
+                        if col1.button("👍 Mark as Useful", key=f"{selected_user}_{prod}_pos"):
+                            cursor.execute("INSERT OR REPLACE INTO feedback (userID, toolTitle, reward) VALUES (?, ?, ?)", (selected_user, prod, 1))
+                            conn.commit()
+                            update_q_value(selected_user, prod, 1)
+                            st.success(f"✅ Positive feedback recorded for '{prod}'!")
+                        if col2.button("👎 Mark as Not Useful", key=f"{selected_user}_{prod}_neg"):
+                            cursor.execute("INSERT OR REPLACE INTO feedback (userID, toolTitle, reward) VALUES (?, ?, ?)", (selected_user, prod, -1))
+                            conn.commit()
+                            update_q_value(selected_user, prod, -1)
+                            st.warning(f"❌ Negative feedback recorded for '{prod}'!")
                     else:
                         st.write(f"- {prod} (No match found)")
     else:
         st.warning("User ID not found in the dataset.")
+
 # ========== TAB 2: Add New User ==========
 with tab2:
     st.write("## ➕ Create a New User Profile")
@@ -256,13 +220,7 @@ with tab2:
                 st.warning("User ID already exists. Please choose another one.")
             else:
                 try:
-                    cursor.execute(
-                        "INSERT INTO users (userID, previousPurchases) VALUES (?, ?)",
-                        (
-                            new_user_id.strip(),
-                            new_user_purchases.strip()
-                        )
-                    )
+                    cursor.execute("INSERT INTO users (userID, previousPurchases) VALUES (?, ?)", (new_user_id.strip(), new_user_purchases.strip()))
                     conn.commit()
                     st.success(f"User '{new_user_id}' added successfully!")
                     retrain_model()
@@ -271,25 +229,22 @@ with tab2:
                 except Exception as e:
                     st.error(f"Unexpected error: {e}")
 
-# ========== TAB 3: Content-Based Filtering ==========
+# ========== TAB 3: Content-Based Suggestions ==========
 with tab3:
-    st.write("## 🧠 Content-Based Filtering")
+    st.write("## 🧐 Content-Based Filtering")
     tools_df = load_data_fresh()[1]
     tools_df['Title_clean'] = tools_df['Title'].str.lower().str.strip()
     selected_tool = st.selectbox("🔍 Select a Tool to Find Similar Ones", tools_df['Title'])
-    selected_category = st.text_input("🔍 Enter Your Category for Personalized Recommendations")
-
     selected_row = tools_df[tools_df['Title'] == selected_tool].iloc[0]
+
     st.markdown(f"### 🔧 You selected: {selected_row['Title']}")
     display_resized_image(selected_row['Image'])
 
     st.subheader("🔗 Similar Products (Same Category):")
-    selected_category_from_tool = selected_row.get("Category", "").lower().strip()
-
-    if selected_category_from_tool:
-        similar_products = tools_df[tools_df['Category'].str.lower().str.strip() == selected_category_from_tool]
+    selected_category = selected_row.get("Category", "").lower().strip()
+    if selected_category:
+        similar_products = tools_df[tools_df['Category'].str.lower().str.strip() == selected_category]
         similar_products = similar_products[similar_products['Title'] != selected_row['Title']].head(5)
-
         if similar_products.empty:
             st.info("No similar products found in the same category.")
         else:
@@ -298,16 +253,6 @@ with tab3:
                 display_resized_image(row['Image'])
     else:
         st.warning("Category information is missing for the selected tool.")
-
-    if selected_category:
-        st.subheader(f"🩺 Products for Category: {selected_category}")
-        cat_prods = tools_df[tools_df['Category'].str.lower().str.contains(selected_category.lower())]
-        if cat_prods.empty:
-            st.info("No products found for this category.")
-        else:
-            for _, row in cat_prods.head(5).iterrows():
-                st.markdown(f"### [{row['Title']}]({row['Title_URL']})")
-                display_resized_image(row['Image'])
 
 # ========== TAB 4: Feedback History ==========
 with tab4:
