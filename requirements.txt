@@ -3,7 +3,7 @@ pandas
 mysql-connector-python
 sqlalchemy
 scikit-learn
-fuzzywuzzy
+fuzzywuzzy [Speed]
 python-Levenshtein
 pillow
 requests
