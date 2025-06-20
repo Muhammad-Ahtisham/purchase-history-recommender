@@ -19,7 +19,7 @@ cursor = conn.cursor()
 cursor.execute('''CREATE TABLE IF NOT EXISTS users (
     userID TEXT PRIMARY KEY,
     previousPurchases TEXT,
-    category TEXT
+    usercategory TEXT
 )''')
 
 cursor.execute('''CREATE TABLE IF NOT EXISTS tools (
@@ -164,7 +164,7 @@ with tab2:
             if cursor.fetchone()[0] > 0:
                 st.warning("User ID already exists. Please choose another one.")
             else:
-                cursor.execute("INSERT INTO users (userID, previousPurchases, category) VALUES (?, ?, ?)",
+                cursor.execute("INSERT INTO users (userID, previousPurchases, userCategory) VALUES (?, ?, ?)",
                                (new_user_id.strip(), new_user_purchases.strip(), new_user_category.strip()))
                 conn.commit()
                 st.success(f"User '{new_user_id}' added successfully!")
